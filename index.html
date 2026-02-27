@@ -36,7 +36,6 @@ body {
     bottom: 60px;
     overflow: hidden;
     background: #1a1a1a;
-    /* own compositing layer — panel repaints won't bleed in */
     transform: translateZ(0);
     isolation: isolate;
 }
@@ -45,7 +44,6 @@ body {
     position: absolute;
     transform-origin: top left;
     will-change: transform;
-    /* promote to own layer so slider DOM writes don't invalidate it */
     backface-visibility: hidden;
 }
 
@@ -53,7 +51,6 @@ canvas {
     display: block;
     cursor: crosshair;
     box-shadow: 0 0 60px #000;
-    /* canvas stays on its own compositing surface */
     will-change: contents;
 }
 
@@ -65,7 +62,6 @@ canvas {
     display: flex;
     align-items: flex-start;
     transition: transform .3s ease;
-    /* isolate this subtree — internal repaints won't affect #vp */
     will-change: transform;
     isolation: isolate;
 }
@@ -81,8 +77,6 @@ canvas {
     overflow-y: auto;
     scrollbar-width: thin;
     scrollbar-color: var(--border) transparent;
-    /* contain layout/style inside panel so slider value changes
-       don't trigger reflow/repaint outside this element */
     contain: layout style;
 }
 
@@ -232,7 +226,6 @@ input[type=range]::-moz-range-thumb {
     line-height: 1.4;
 }
 
-/* Stroke queue indicator */
 #stroke-queue-info {
     padding: 10px 16px;
     border-bottom: 1px solid var(--border);
@@ -477,6 +470,13 @@ input[type=range]::-moz-range-thumb {
 </div>
 
 <script>
+
+window.addEventListener('beforeunload', function (e) {
+    e.preventDefault();    
+
+    e.returnValue = '';
+  });
+    
 const theCanvasThing   = document.getElementById('canvas');
 const thePainter       = theCanvasThing.getContext('2d');
 const theStageDaddy    = document.getElementById('stage');
@@ -491,12 +491,9 @@ let isCurrentlyScribbling  = false;
 let isCurrentlyScooting    = false;
 let scribblePoints         = [];
 
-// --- Stroke queue with numbered strokes ---
-// Each completed stroke is stored as { id, points }
-// Fill is applied sequentially: 1→2, 2→3, 3→4, ...
-let strokeQueue   = [];    // array of { id, points }
-let fillBusy      = false; // prevent concurrent fill animations
-let fillPairIndex = 0;     // persistent pointer: next pair to fill
+let strokeQueue   = [];    
+let fillBusy      = false; 
+let fillPairIndex = 0;     
 
 let panBeganAtX            = 0;
 let panBeganAtY            = 0;
@@ -507,15 +504,12 @@ const HOWMANYPOINTSRESAMPLE = 150;
 
 const STEGO_SIGNATURE = 'SP-VB4';
 
-// --- FIX 2: Zoom is relative to canvas resolution ---
-// "100%" means the canvas fits within the viewport.
-// We calculate a "fit scale" so that at 100% the whole canvas is visible.
 function calcFitScale() {
     const vpW = theViewportBox.clientWidth;
     const vpH = theViewportBox.clientHeight;
     const scaleW = vpW / theCanvasThing.width;
     const scaleH = vpH / theCanvasThing.height;
-    return Math.min(scaleW, scaleH) * 0.92; // small padding
+    return Math.min(scaleW, scaleH) * 0.92; 
 }
 
 function shoveTransform() {
@@ -563,7 +557,6 @@ function resetWholeView() {
     squishToMiddle();
 }
 
-// Update the stroke queue UI panel
 function updateQueueUI() {
     const countEl = document.getElementById('sq-count');
     const pairsEl = document.getElementById('sq-pairs-list');
@@ -772,7 +765,6 @@ function stretchPathEvenly(squigglyPath, howManyPleaseGod) {
     return niceNewPoints;
 }
 
-// --- FIX 3: fill line width is now direct px, separate from brush size ---
 async function doTheFancyLineThing(pathA, pathB) {
     const stretchedOldPath  = stretchPathEvenly(pathA, HOWMANYPOINTSRESAMPLE);
     const stretchedNewPath  = stretchPathEvenly(pathB, HOWMANYPOINTSRESAMPLE);
@@ -791,7 +783,6 @@ async function doTheFancyLineThing(pathA, pathB) {
         thePainter.lineCap     = 'round';
         thePainter.lineJoin    = 'round';
 
-        // Build interpolated points for this line
         const linePoints = [];
         for (let dottyIndex = 0; dottyIndex < HOWMANYPOINTSRESAMPLE; dottyIndex++) {
             const interpolatedX = stretchedOldPath[dottyIndex].x + (stretchedNewPath[dottyIndex].x - stretchedOldPath[dottyIndex].x) * howFarAlongAreWe;
@@ -1152,8 +1143,6 @@ squishToMiddle();
 SketcherSound.init();
 SketcherSound.setCanvasSize(theCanvasThing.width, theCanvasThing.height);
 
-// ---- Slider readouts wired via JS (no inline oninput) ----
-// Using requestAnimationFrame to batch DOM writes and avoid reflow during input
 function wireSlider(sliderId, readoutId, suffix) {
     const slider  = document.getElementById(sliderId);
     const readout = document.getElementById(readoutId);
