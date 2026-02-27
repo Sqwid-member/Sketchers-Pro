@@ -1,0 +1,1220 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>SKETCHER PRO</title>
+<script src="sketcher-sound.js"></script>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=Bebas+Neue&display=swap');
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+* { -webkit-tap-highlight-color: transparent; }
+
+:root {
+    --black:  #0a0a0a;
+    --dark:   #111;
+    --mid:    #1e1e1e;
+    --border: #2e2e2e;
+    --bright: #efefef;
+    --muted:  #666;
+    --white:  #ffffff;
+}
+
+body {
+    width: 100vw; height: 100vh;
+    background: #222;
+    overflow: hidden;
+    touch-action: none;
+    font-family: 'Space Mono', monospace;
+    user-select: none;
+}
+
+#vp {
+    position: fixed;
+    inset: 0;
+    bottom: 60px;
+    overflow: hidden;
+    background: #1a1a1a;
+    /* own compositing layer — panel repaints won't bleed in */
+    transform: translateZ(0);
+    isolation: isolate;
+}
+
+#stage {
+    position: absolute;
+    transform-origin: top left;
+    will-change: transform;
+    /* promote to own layer so slider DOM writes don't invalidate it */
+    backface-visibility: hidden;
+}
+
+canvas {
+    display: block;
+    cursor: crosshair;
+    box-shadow: 0 0 60px #000;
+    /* canvas stays on its own compositing surface */
+    will-change: contents;
+}
+
+#panel-wrap {
+    position: fixed;
+    top: 0; left: 0;
+    height: calc(100vh - 60px);
+    z-index: 300;
+    display: flex;
+    align-items: flex-start;
+    transition: transform .3s ease;
+    /* isolate this subtree — internal repaints won't affect #vp */
+    will-change: transform;
+    isolation: isolate;
+}
+#panel-wrap.hidden { transform: translateX(-260px); }
+
+#panel {
+    width: 260px;
+    height: 100%;
+    background: var(--dark);
+    border-right: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+    /* contain layout/style inside panel so slider value changes
+       don't trigger reflow/repaint outside this element */
+    contain: layout style;
+}
+
+.p-head {
+    background: var(--white);
+    color: var(--black);
+    padding: 13px 18px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 24px;
+    letter-spacing: 4px;
+    border-bottom: 2px solid var(--border);
+    flex-shrink: 0;
+}
+
+.p-sect {
+    border-bottom: 1px solid var(--border);
+    padding: 14px 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.p-sect-title {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 12px;
+    letter-spacing: 2px;
+    color: var(--muted);
+}
+
+.field { display: flex; flex-direction: column; gap: 4px; }
+
+.field label {
+    font-size: 8px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    color: var(--muted);
+    display: block;
+}
+
+.row { display: flex; align-items: center; gap: 6px; }
+.row .sep { color: var(--muted); font-size: 11px; flex-shrink: 0; }
+
+input[type=number] {
+    width: 100%;
+    background: var(--mid);
+    border: 1px solid var(--border);
+    color: var(--bright);
+    font-family: 'Space Mono', monospace;
+    font-size: 11px;
+    padding: 7px 8px;
+    outline: none;
+    transition: border-color .15s;
+}
+input[type=number]:focus { border-color: var(--white); }
+.row input[type=number] { width: 85px; flex-shrink: 0; }
+
+input[type=range] {
+    -webkit-appearance: none;
+    width: 100%;
+    height: 2px;
+    background: var(--border);
+    outline: none;
+    cursor: pointer;
+    touch-action: none;
+}
+input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    width: 20px; height: 20px;
+    background: var(--white);
+    cursor: pointer;
+    border-radius: 0;
+}
+input[type=range]::-moz-range-thumb {
+    width: 20px; height: 20px;
+    background: var(--white);
+    border: none;
+    border-radius: 0;
+    cursor: pointer;
+}
+
+.readout {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--bright);
+    text-align: right;
+    letter-spacing: 1px;
+}
+
+.p-actions {
+    border-bottom: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.p-actions-bottom {
+    margin-top: auto;
+    border-top: 2px solid var(--border);
+    display: flex;
+    flex-direction: column;
+}
+
+.p-btn {
+    padding: 14px 18px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: var(--mid);
+    color: var(--bright);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 15px;
+    letter-spacing: 2px;
+    text-align: left;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: background .12s, color .12s;
+}
+.p-btn:last-child { border-bottom: none; }
+.p-btn:hover { background: var(--white); color: var(--black); }
+
+.p-btn .mark {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: var(--muted);
+    flex-shrink: 0;
+}
+.p-btn:hover .mark { color: var(--black); }
+
+.p-credit {
+    padding: 12px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+}
+.p-credit-name {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1.5px;
+    color: var(--muted);
+}
+.p-credit-copy {
+    font-size: 8px;
+    letter-spacing: 1px;
+    color: #444;
+    text-transform: uppercase;
+    line-height: 1.4;
+}
+
+/* Stroke queue indicator */
+#stroke-queue-info {
+    padding: 10px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.sq-label {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    letter-spacing: 2px;
+    color: var(--muted);
+}
+.sq-value {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    color: var(--bright);
+}
+.sq-pairs {
+    font-family: 'Space Mono', monospace;
+    font-size: 9px;
+    color: #555;
+    line-height: 1.5;
+    max-height: 60px;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border) transparent;
+}
+.sq-pairs .active-pair {
+    color: #aaa;
+}
+
+#toggle-flap {
+    background: var(--dark);
+    border: 2px solid var(--border);
+    border-left: none;
+    width: 24px;
+    height: 60px;
+    margin-top: 80px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 10px;
+    letter-spacing: 2px;
+    writing-mode: vertical-rl;
+    flex-shrink: 0;
+    transition: color .2s, background .2s;
+}
+#toggle-flap:hover { color: var(--bright); background: var(--mid); }
+
+#bottom-bar {
+    position: fixed;
+    bottom: 0; left: 0; right: 0;
+    height: 60px;
+    z-index: 300;
+    background: var(--dark);
+    border-top: 2px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 18px;
+    gap: 14px;
+}
+
+.tool-group {
+    display: flex;
+    border: 1px solid var(--border);
+    flex-shrink: 0;
+}
+
+.t-btn {
+    background: var(--mid);
+    border: none;
+    border-right: 1px solid var(--border);
+    color: var(--muted);
+    width: 56px;
+    height: 42px;
+    cursor: pointer;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    font-size: 16px;
+    transition: background .12s, color .12s;
+}
+.t-btn:last-child { border-right: none; }
+.t-btn .tlabel {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 8px;
+    letter-spacing: 1.5px;
+    color: inherit;
+}
+.t-btn:hover { background: var(--border); color: var(--bright); }
+.t-btn.active { background: var(--white); color: var(--black); }
+.t-btn.active .tlabel { color: var(--black); }
+
+.zoom-strip {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+.zoom-strip .ztag {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 13px;
+    letter-spacing: 2px;
+    color: var(--muted);
+    flex-shrink: 0;
+}
+.zoom-strip .zval {
+    font-family: 'Space Mono', monospace;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--bright);
+    min-width: 43px;
+    text-align: right;
+    flex-shrink: 0;
+}
+.zoom-strip input[type=range] { flex: 1; }
+
+.z-reset {
+    background: var(--mid);
+    border: 1px solid var(--border);
+    color: var(--muted);
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 11px;
+    letter-spacing: 1px;
+    padding: 6px 10px;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background .12s, color .12s;
+}
+.z-reset:hover { background: var(--white); color: var(--black); }
+</style>
+</head>
+<body>
+
+<div id="vp">
+    <div id="stage">
+        <canvas id="canvas"></canvas>
+    </div>
+</div>
+
+<div id="panel-wrap" class="hidden">
+    <div id="panel">
+        <div class="p-head">SKETCHER PRO</div>
+
+        <div class="p-sect">
+            <div class="p-sect-title">Canvas Resolution</div>
+            <div class="field">
+                <label>Width × Height (px)</label>
+                <div class="row">
+                    <input type="number" id="res-w" value="1200">
+                    <span class="sep">×</span>
+                    <input type="number" id="res-h" value="1200">
+                </div>
+            </div>
+        </div>
+
+        <div class="p-sect">
+            <div class="p-sect-title">Brush</div>
+            <div class="field">
+                <label>Brush size (px)</label>
+                <input type="number" id="brush-size" value="3" min="1" max="200">
+            </div>
+        </div>
+
+        <div class="p-sect">
+            <div class="p-sect-title">Fill Lines</div>
+            <div class="field">
+                <label>Fill line width (px)</label>
+                <input type="range" id="fill-width" min="1" max="100" value="2">
+                <div class="readout" id="fill-width-val">2px</div>
+            </div>
+            <div class="field">
+                <label>Fill line opacity (%)</label>
+                <input type="range" id="fill-opacity" min="1" max="100" value="100">
+                <div class="readout" id="fill-opacity-val">100%</div>
+            </div>
+        </div>
+
+        <div class="p-sect">
+            <div class="p-sect-title">Interpolation</div>
+            <div class="field">
+                <label>Fill line count</label>
+                <input type="number" id="line-count" value="40" min="1">
+            </div>
+            <div class="field">
+                <label>Animation delay (ms)</label>
+                <input type="number" id="anim-ms" value="10" min="0">
+            </div>
+        </div>
+
+        <!-- Stroke queue display -->
+        <div id="stroke-queue-info">
+            <div class="sq-label">Stroke Queue</div>
+            <div class="sq-value" id="sq-count">0 strokes</div>
+            <div class="sq-pairs" id="sq-pairs-list">—</div>
+        </div>
+
+        <div class="p-actions">
+            <button class="p-btn" onclick="doApplyStuff()">
+                <span class="mark">[//]</span> Apply Settings
+            </button>
+            <button class="p-btn" onclick="doSaveThing()">
+                <span class="mark">[->]</span> Export PNG
+            </button>
+            <button class="p-btn" onclick="doNukeCanvas()">
+                <span class="mark">[XX]</span> Clear Canvas
+            </button>
+        </div>
+
+        <div class="p-credit">
+            <div class="p-credit-name">Open Source · Vladyslav Bubalo</div>
+            <div class="p-credit-copy">© All rights reserved. Unauthorized copying,<br>redistribution or resale is strictly prohibited.</div>
+        </div>
+    </div>
+    <button id="toggle-flap" onclick="flapToggle()">PANEL</button>
+</div>
+
+<div id="bottom-bar">
+    <div class="tool-group">
+        <button class="t-btn active" id="btn-brush" onclick="pickTool('brush')" title="Draw">
+            ✏
+            <span class="tlabel">BRUSH</span>
+        </button>
+        <button class="t-btn" id="btn-hand" onclick="pickTool('hand')" title="Pan canvas">
+            ✋
+            <span class="tlabel">HAND</span>
+        </button>
+    </div>
+
+    <div class="zoom-strip">
+        <span class="ztag">ZOOM</span>
+        <input type="range" id="zoom-range" min="5" max="700" value="100">
+        <span class="zval" id="zoom-val">100%</span>
+        <button class="z-reset" onclick="resetWholeView()">FIT</button>
+    </div>
+</div>
+
+<script>
+const theCanvasThing   = document.getElementById('canvas');
+const thePainter       = theCanvasThing.getContext('2d');
+const theStageDaddy    = document.getElementById('stage');
+const theViewportBox   = document.getElementById('vp');
+
+let currentlyChosenTool    = 'brush';
+let howMuchZoomyZoom       = 1;
+let offsetGoesX            = 0;
+let offsetGoesY            = 0;
+
+let isCurrentlyScribbling  = false;
+let isCurrentlyScooting    = false;
+let scribblePoints         = [];
+
+// --- Stroke queue with numbered strokes ---
+// Each completed stroke is stored as { id, points }
+// Fill is applied sequentially: 1→2, 2→3, 3→4, ...
+let strokeQueue   = [];    // array of { id, points }
+let fillBusy      = false; // prevent concurrent fill animations
+let fillPairIndex = 0;     // persistent pointer: next pair to fill
+
+let panBeganAtX            = 0;
+let panBeganAtY            = 0;
+let panBeganOffsetX        = 0;
+let panBeganOffsetY        = 0;
+
+const HOWMANYPOINTSRESAMPLE = 150;
+
+const STEGO_SIGNATURE = 'SP-VB4';
+
+// --- FIX 2: Zoom is relative to canvas resolution ---
+// "100%" means the canvas fits within the viewport.
+// We calculate a "fit scale" so that at 100% the whole canvas is visible.
+function calcFitScale() {
+    const vpW = theViewportBox.clientWidth;
+    const vpH = theViewportBox.clientHeight;
+    const scaleW = vpW / theCanvasThing.width;
+    const scaleH = vpH / theCanvasThing.height;
+    return Math.min(scaleW, scaleH) * 0.92; // small padding
+}
+
+function shoveTransform() {
+    const fitScale = calcFitScale();
+    const actualScale = fitScale * howMuchZoomyZoom;
+    const blobW = theViewportBox.clientWidth;
+    const blobH = theViewportBox.clientHeight;
+    const nudgeX = blobW/2 + offsetGoesX - (theCanvasThing.width  * actualScale)/2;
+    const nudgeY = blobH/2 + offsetGoesY - (theCanvasThing.height * actualScale)/2;
+    theStageDaddy.style.transform = `translate(${nudgeX}px,${nudgeY}px) scale(${actualScale})`;
+    theStageDaddy.style.transformOrigin = 'top left';
+}
+
+function squishToMiddle() {
+    offsetGoesX = 0;
+    offsetGoesY = 0;
+    shoveTransform();
+}
+
+function bumpReadout(sliderGuy, labelGuy, suffixThing) {
+    document.getElementById(labelGuy).textContent =
+        document.getElementById(sliderGuy).value + suffixThing;
+}
+
+function flapToggle() {
+    document.getElementById('panel-wrap').classList.toggle('hidden');
+}
+
+function pickTool(whateverTool) {
+    currentlyChosenTool = whateverTool;
+    document.getElementById('btn-brush').classList.toggle('active', whateverTool === 'brush');
+    document.getElementById('btn-hand').classList.toggle('active', whateverTool === 'hand');
+    theCanvasThing.style.cursor = whateverTool === 'hand' ? 'grab' : 'crosshair';
+}
+
+function doZoomyZoom(howMuch) {
+    howMuchZoomyZoom = Math.min(7, Math.max(0.05, howMuch));
+    document.getElementById('zoom-range').value = Math.round(howMuchZoomyZoom * 100);
+    document.getElementById('zoom-val').textContent = Math.round(howMuchZoomyZoom * 100) + '%';
+    shoveTransform();
+}
+
+function resetWholeView() {
+    doZoomyZoom(1);
+    squishToMiddle();
+}
+
+// Update the stroke queue UI panel
+function updateQueueUI() {
+    const countEl = document.getElementById('sq-count');
+    const pairsEl = document.getElementById('sq-pairs-list');
+    const n = strokeQueue.length;
+    countEl.textContent = n === 0 ? '0 strokes' : `${n} stroke${n > 1 ? 's' : ''}`;
+
+    if (n < 2) {
+        pairsEl.innerHTML = n === 0
+            ? '—'
+            : `<span style="color:#555">Stroke #1 ready — draw another to fill</span>`;
+        return;
+    }
+
+    let html = '';
+    for (let i = 0; i < n - 1; i++) {
+        html += `<span class="${i === 0 ? 'active-pair' : ''}">#${strokeQueue[i].id} → #${strokeQueue[i+1].id}</span>\n`;
+    }
+    pairsEl.innerHTML = html;
+}
+
+theViewportBox.addEventListener('wheel', potatoWheelEvent => {
+    potatoWheelEvent.preventDefault();
+    const zoomFactor = potatoWheelEvent.deltaY < 0 ? 1.1 : 0.9;
+    doZoomyZoom(howMuchZoomyZoom * zoomFactor);
+}, { passive: false });
+
+function grabMouseXY(someEvent) {
+    if (someEvent.touches) return { x: someEvent.touches[0].clientX, y: someEvent.touches[0].clientY };
+    return { x: someEvent.clientX, y: someEvent.clientY };
+}
+
+function isInsideUIJunk(someEvent) {
+    return someEvent.target.closest('#panel-wrap') || someEvent.target.closest('#bottom-bar');
+}
+
+function screenCoordsToCanvasCoords(screenX, screenY) {
+    const canvasRect = theCanvasThing.getBoundingClientRect();
+    return {
+        x: (screenX - canvasRect.left) * (theCanvasThing.width  / canvasRect.width),
+        y: (screenY - canvasRect.top)  * (theCanvasThing.height / canvasRect.height)
+    };
+}
+
+theViewportBox.addEventListener('mousedown',  pointerGoesDown);
+theViewportBox.addEventListener('touchstart', pointerGoesDown, { passive: false });
+window.addEventListener('mousemove',  pointerGoesSideways);
+window.addEventListener('touchmove',  pointerGoesSideways, { passive: false });
+window.addEventListener('mouseup',   pointerGoesUp);
+window.addEventListener('touchend',  pointerGoesUp);
+
+function pointerGoesDown(theFingerEvent) {
+    if (isInsideUIJunk(theFingerEvent)) return;
+    if (theFingerEvent.cancelable) theFingerEvent.preventDefault();
+
+    const mouseCoords = grabMouseXY(theFingerEvent);
+
+    if (currentlyChosenTool === 'brush') {
+        isCurrentlyScribbling = true;
+        const firstDot = screenCoordsToCanvasCoords(mouseCoords.x, mouseCoords.y);
+        scribblePoints = [firstDot];
+        thePainter.beginPath();
+        thePainter.moveTo(firstDot.x, firstDot.y);
+        // Sound: brush down
+        SketcherSound.onBrushDown(firstDot);
+    }
+
+    if (currentlyChosenTool === 'hand') {
+        isCurrentlyScooting = true;
+        theCanvasThing.style.cursor = 'grabbing';
+        panBeganAtX     = mouseCoords.x;
+        panBeganAtY     = mouseCoords.y;
+        panBeganOffsetX = offsetGoesX;
+        panBeganOffsetY = offsetGoesY;
+    }
+}
+
+function pointerGoesSideways(theFingerEvent) {
+    if (theFingerEvent.cancelable) theFingerEvent.preventDefault();
+    const mouseCoords = grabMouseXY(theFingerEvent);
+
+    if (isCurrentlyScribbling && currentlyChosenTool === 'brush') {
+        const freshDot    = screenCoordsToCanvasCoords(mouseCoords.x, mouseCoords.y);
+        const previousDot = scribblePoints[scribblePoints.length - 1];
+        scribblePoints.push(freshDot);
+
+        const brushThickness = +document.getElementById('brush-size').value || 3;
+        thePainter.beginPath();
+        thePainter.strokeStyle = 'black';
+        thePainter.lineWidth   = brushThickness;
+        thePainter.lineCap     = 'round';
+        thePainter.lineJoin    = 'round';
+        thePainter.moveTo(previousDot.x, previousDot.y);
+        thePainter.lineTo(freshDot.x,    freshDot.y);
+        thePainter.stroke();
+        // Sound: brush move
+        SketcherSound.onBrushMove(freshDot);
+    }
+
+    if (isCurrentlyScooting && currentlyChosenTool === 'hand') {
+        offsetGoesX = panBeganOffsetX + (mouseCoords.x - panBeganAtX);
+        offsetGoesY = panBeganOffsetY + (mouseCoords.y - panBeganAtY);
+        shoveTransform();
+    }
+}
+
+async function pointerGoesUp() {
+    if (isCurrentlyScribbling) {
+        isCurrentlyScribbling = false;
+        // Sound: brush up
+        SketcherSound.onBrushUp();
+
+        if (scribblePoints.length > 3) {
+            const newStroke = {
+                id: strokeQueue.length + 1,
+                points: [...scribblePoints]
+            };
+            strokeQueue.push(newStroke);
+            updateQueueUI();
+
+            // If fill chain is already running it will pick up the new stroke
+            // automatically (the while-loop checks strokeQueue.length live).
+            // Only kick it off if it's not already running.
+            if (!fillBusy) {
+                runFillChain();
+            }
+        }
+    }
+    if (isCurrentlyScooting) {
+        isCurrentlyScooting = false;
+        theCanvasThing.style.cursor = 'grab';
+    }
+}
+
+// Process fill pairs sequentially using a persistent index so that
+// resuming after idle always continues from the last filled pair,
+// not from the beginning of the queue.
+async function runFillChain() {
+    if (fillBusy) return;
+    fillBusy = true;
+
+    while (fillPairIndex < strokeQueue.length - 1) {
+        const strokeA = strokeQueue[fillPairIndex];
+        const strokeB = strokeQueue[fillPairIndex + 1];
+
+        highlightPairInUI(fillPairIndex);
+        await doTheFancyLineThing(strokeA.points, strokeB.points);
+
+        fillPairIndex++;
+        updateQueueUI();
+    }
+
+    // All pending pairs done. Keep only the very last stroke as the
+    // "previous" anchor for the next stroke the user will draw.
+    // Compact the queue: one element remaining, reset pointer to 0.
+    if (strokeQueue.length > 0) {
+        strokeQueue = [strokeQueue[strokeQueue.length - 1]];
+        fillPairIndex = 0;
+        updateQueueUI();
+    }
+
+    fillBusy = false;
+}
+
+function highlightPairInUI(activePairIndex) {
+    const pairsEl = document.getElementById('sq-pairs-list');
+    const spans = pairsEl.querySelectorAll('span');
+    spans.forEach((s, i) => {
+        s.classList.toggle('active-pair', i === activePairIndex);
+    });
+}
+
+function stretchPathEvenly(squigglyPath, howManyPleaseGod) {
+    let totalLengthOfThisJunk = 0;
+    for (let poopIndex = 1; poopIndex < squigglyPath.length; poopIndex++)
+        totalLengthOfThisJunk += Math.hypot(
+            squigglyPath[poopIndex].x - squigglyPath[poopIndex-1].x,
+            squigglyPath[poopIndex].y - squigglyPath[poopIndex-1].y
+        );
+    if (totalLengthOfThisJunk === 0) return Array(howManyPleaseGod).fill(squigglyPath[0]);
+
+    const gapBetweenDots = totalLengthOfThisJunk / (howManyPleaseGod - 1);
+    const niceNewPoints  = [];
+    let distanceSoFarOhNo = 0;
+    let segmentIndex = 1;
+
+    for (let dotNumber = 0; dotNumber < howManyPleaseGod; dotNumber++) {
+        const wantedDistance = dotNumber * gapBetweenDots;
+        while (segmentIndex < squigglyPath.length - 1) {
+            const segLen = Math.hypot(
+                squigglyPath[segmentIndex].x - squigglyPath[segmentIndex-1].x,
+                squigglyPath[segmentIndex].y - squigglyPath[segmentIndex-1].y
+            );
+            if (distanceSoFarOhNo + segLen >= wantedDistance) break;
+            distanceSoFarOhNo += segLen;
+            segmentIndex++;
+        }
+        const dotA   = squigglyPath[segmentIndex-1];
+        const dotB   = squigglyPath[segmentIndex];
+        const segLen = Math.hypot(dotB.x - dotA.x, dotB.y - dotA.y);
+        const lerpT  = segLen === 0 ? 0 : (wantedDistance - distanceSoFarOhNo) / segLen;
+        niceNewPoints.push({
+            x: dotA.x + (dotB.x - dotA.x) * lerpT,
+            y: dotA.y + (dotB.y - dotA.y) * lerpT
+        });
+    }
+    return niceNewPoints;
+}
+
+// --- FIX 3: fill line width is now direct px, separate from brush size ---
+async function doTheFancyLineThing(pathA, pathB) {
+    const stretchedOldPath  = stretchPathEvenly(pathA, HOWMANYPOINTSRESAMPLE);
+    const stretchedNewPath  = stretchPathEvenly(pathB, HOWMANYPOINTSRESAMPLE);
+
+    const howManyFillLines     = +document.getElementById('line-count').value    || 40;
+    const waitBetweenEachLine  = +document.getElementById('anim-ms').value       || 0;
+    const fillWidthPx          = +document.getElementById('fill-width').value    || 2;
+    const fillOpacityNumber    = (+document.getElementById('fill-opacity').value || 100) / 100;
+    const lineThiccness        = Math.max(0.5, fillWidthPx);
+
+    for (let lineCounterDude = 1; lineCounterDude <= howManyFillLines; lineCounterDude++) {
+        const howFarAlongAreWe = lineCounterDude / (howManyFillLines + 1);
+        thePainter.beginPath();
+        thePainter.strokeStyle = `rgba(0,0,0,${fillOpacityNumber})`;
+        thePainter.lineWidth   = lineThiccness;
+        thePainter.lineCap     = 'round';
+        thePainter.lineJoin    = 'round';
+
+        // Build interpolated points for this line
+        const linePoints = [];
+        for (let dottyIndex = 0; dottyIndex < HOWMANYPOINTSRESAMPLE; dottyIndex++) {
+            const interpolatedX = stretchedOldPath[dottyIndex].x + (stretchedNewPath[dottyIndex].x - stretchedOldPath[dottyIndex].x) * howFarAlongAreWe;
+            const interpolatedY = stretchedOldPath[dottyIndex].y + (stretchedNewPath[dottyIndex].y - stretchedOldPath[dottyIndex].y) * howFarAlongAreWe;
+            linePoints.push({ x: interpolatedX, y: interpolatedY });
+            dottyIndex === 0 ? thePainter.moveTo(interpolatedX, interpolatedY) : thePainter.lineTo(interpolatedX, interpolatedY);
+        }
+        thePainter.stroke();
+
+        // Sound: one partial per fill line
+        SketcherSound.onFillLine(howFarAlongAreWe, linePoints);
+
+        if (waitBetweenEachLine > 0) await new Promise(yesOkayResolve => setTimeout(yesOkayResolve, waitBetweenEachLine));
+    }
+}
+
+function doApplyStuff() {
+    const canvasWidthNumber  = +document.getElementById('res-w').value || 1200;
+    const canvasHeightNumber = +document.getElementById('res-h').value || 1200;
+    const snapshotBlob = thePainter.getImageData(0, 0, theCanvasThing.width, theCanvasThing.height);
+    theCanvasThing.width  = canvasWidthNumber;
+    theCanvasThing.height = canvasHeightNumber;
+    thePainter.fillStyle = '#ffffff';
+    thePainter.fillRect(0, 0, theCanvasThing.width, theCanvasThing.height);
+    thePainter.putImageData(snapshotBlob, 0, 0);
+    squishToMiddle();
+    // Sync canvas size to sound engine so Y→freq mapping stays correct
+    SketcherSound.setCanvasSize(canvasWidthNumber, canvasHeightNumber);
+}
+
+function doNukeCanvas() {
+    thePainter.fillStyle = '#ffffff';
+    thePainter.fillRect(0, 0, theCanvasThing.width, theCanvasThing.height);
+    strokeQueue   = [];
+    fillBusy      = false;
+    fillPairIndex = 0;
+    updateQueueUI();
+    SketcherSound.reset();
+}
+
+function embedStegoSignature(targetCanvas, signatureText) {
+    const stegoCtx = targetCanvas.getContext('2d');
+    const pixelDump = stegoCtx.getImageData(0, 0, targetCanvas.width, targetCanvas.height);
+    const rawPixels = pixelDump.data;
+    const W = targetCanvas.width;
+    const H = targetCanvas.height;
+
+    const bitPatternForChar = (charCode, bitIndex) => (charCode >> (7 - bitIndex)) & 1;
+
+    const signatureBytes = [];
+    for (let charIdx = 0; charIdx < signatureText.length; charIdx++)
+        signatureBytes.push(signatureText.charCodeAt(charIdx));
+    signatureBytes.push(0);
+
+    const stampSignatureAtSpot = (startPixelX, startPixelY) => {
+        let pixelCursor = startPixelX + startPixelY * W;
+        for (let byteIdx = 0; byteIdx < signatureBytes.length; byteIdx++) {
+            for (let bitIdx = 0; bitIdx < 8; bitIdx++) {
+                const flatArrayPos = pixelCursor * 4;
+                if (flatArrayPos + 3 >= rawPixels.length) return;
+                rawPixels[flatArrayPos] = (rawPixels[flatArrayPos] & 0xFE) | bitPatternForChar(signatureBytes[byteIdx], bitIdx);
+                pixelCursor++;
+            }
+        }
+    };
+
+    const edgePad = 8;
+    stampSignatureAtSpot(edgePad,         edgePad);
+    stampSignatureAtSpot(W - edgePad - 80, edgePad);
+    stampSignatureAtSpot(edgePad,         H - edgePad - 2);
+    stampSignatureAtSpot(W - edgePad - 80, H - edgePad - 2);
+    stampSignatureAtSpot(Math.floor(W/2) - 40, Math.floor(H/2));
+
+    stegoCtx.putImageData(pixelDump, 0, 0);
+}
+
+function embedUnicodeMetadata(targetCanvas) {
+    const metaCtx = targetCanvas.getContext('2d');
+    const metaString = '\u006D\u0061\u0064\u0065\u0020\u0062\u0079\u0020\u0053\u006B\u0065\u0074\u0063\u0068\u0065\u0072\u0020\u0050\u0072\u006F\u0020\u0062\u0079\u0020\u0056\u006C\u0061\u0064\u0079\u0073\u006C\u0061\u0076\u0020\u0042\u0075\u0062\u0061\u006C\u006F';
+    metaCtx.save();
+    metaCtx.globalAlpha = 0.004;
+    metaCtx.fillStyle = '#000000';
+    metaCtx.font = '1px monospace';
+    metaCtx.fillText(metaString, 2, targetCanvas.height - 1);
+    metaCtx.restore();
+}
+
+function doSaveThing() {
+    const exportCanvas = document.createElement('canvas');
+    exportCanvas.width  = theCanvasThing.width;
+    exportCanvas.height = theCanvasThing.height;
+    const exportCtx = exportCanvas.getContext('2d');
+    exportCtx.drawImage(theCanvasThing, 0, 0);
+
+    embedStegoSignature(exportCanvas, STEGO_SIGNATURE);
+    embedUnicodeMetadata(exportCanvas);
+
+    const rawBase64 = exportCanvas.toDataURL('image/png').split(',')[1];
+    const rawBytes  = atob(rawBase64);
+    const byteArray = new Uint8Array(rawBytes.length);
+    for (let byteIdxLoop = 0; byteIdxLoop < rawBytes.length; byteIdxLoop++)
+        byteArray[byteIdxLoop] = rawBytes.charCodeAt(byteIdxLoop);
+
+    const nowDateString = new Date().toISOString().replace('T', ' ').substring(0, 19);
+    const exifChunkData = buildExifChunk({
+        software:    'Sketcher Pro by Vladyslav Bubalo',
+        artist:      'Vladyslav Bubalo',
+        copyright:   '\u00A9 Vladyslav Bubalo. All rights reserved.',
+        imageDesc:   'Made with Sketcher Pro',
+        userComment: 'SP-VB4 | Unauthorized copying prohibited.',
+        dateTime:    nowDateString,
+    });
+
+    const textChunksList = [
+        { keyword: 'Software',    text: 'Sketcher Pro by Vladyslav Bubalo' },
+        { keyword: 'Author',      text: 'Vladyslav Bubalo' },
+        { keyword: 'Copyright',   text: '\u00A9 Vladyslav Bubalo. All rights reserved.' },
+        { keyword: 'Comment',     text: 'SP-VB4 | Unauthorized copying prohibited.' },
+        { keyword: 'Creation Time', text: nowDateString },
+    ];
+
+    const finalPngBytes = injectAllPngChunks(byteArray, exifChunkData, textChunksList);
+
+    const blobThing = new Blob([finalPngBytes], { type: 'image/png' });
+    const blobUrl   = URL.createObjectURL(blobThing);
+    const downloadLinkElement = document.createElement('a');
+    downloadLinkElement.download = `sketch-${theCanvasThing.width}x${theCanvasThing.height}.png`;
+    downloadLinkElement.href = blobUrl;
+    downloadLinkElement.click();
+    setTimeout(() => URL.revokeObjectURL(blobUrl), 5000);
+}
+
+function buildExifChunk(metaFields) {
+    const enc = new TextEncoder();
+
+    function strBytes(s) {
+        const b = enc.encode(s);
+        const out = new Uint8Array(b.length + 1);
+        out.set(b); out[b.length] = 0;
+        return out;
+    }
+
+    function writeU16LE(buf, off, val) { buf[off]=val&0xFF; buf[off+1]=(val>>8)&0xFF; }
+    function writeU32LE(buf, off, val) {
+        buf[off]=val&0xFF; buf[off+1]=(val>>8)&0xFF;
+        buf[off+2]=(val>>16)&0xFF; buf[off+3]=(val>>24)&0xFF;
+    }
+
+    const TAG_IMAGE_DESC   = 0x010E;
+    const TAG_SOFTWARE     = 0x0131;
+    const TAG_DATETIME     = 0x0132;
+    const TAG_ARTIST       = 0x013B;
+    const TAG_COPYRIGHT    = 0x8298;
+    const TAG_EXIF_IFD_PTR = 0x8769;
+
+    const TAG_USER_COMMENT = 0x9286;
+
+    const TYPE_ASCII  = 2;
+    const TYPE_UNDEFINED = 7;
+
+    const fieldDefs = [
+        { tag: TAG_IMAGE_DESC, val: strBytes(metaFields.imageDesc) },
+        { tag: TAG_SOFTWARE,   val: strBytes(metaFields.software)  },
+        { tag: TAG_DATETIME,   val: strBytes(metaFields.dateTime)  },
+        { tag: TAG_ARTIST,     val: strBytes(metaFields.artist)    },
+        { tag: TAG_COPYRIGHT,  val: strBytes(metaFields.copyright) },
+    ];
+
+    fieldDefs.sort((aEntry, bEntry) => aEntry.tag - bEntry.tag);
+
+    const exifSubTags = [
+        { tag: TAG_USER_COMMENT, type: TYPE_UNDEFINED,
+          val: (() => {
+              const charsetHeader = new Uint8Array([0x41,0x53,0x43,0x49,0x49,0x00,0x00,0x00]);
+              const textBytes = enc.encode(metaFields.userComment);
+              const combined = new Uint8Array(charsetHeader.length + textBytes.length);
+              combined.set(charsetHeader); combined.set(textBytes, charsetHeader.length);
+              return combined;
+          })()
+        },
+    ];
+
+    const ifd0EntryCount  = fieldDefs.length + 1;
+    const ifd0HeaderSize  = 8 + 2 + ifd0EntryCount * 12 + 4;
+    const exifIfdSize     = 2 + exifSubTags.length * 12 + 4;
+
+    let heapOffset = ifd0HeaderSize + exifIfdSize;
+    const heapPieces = [];
+
+    const exifIfdOffsetInTiff = ifd0HeaderSize;
+
+    const ifd0Entries = fieldDefs.map(fldDef => {
+        const valBytes = fldDef.val;
+        let valueOrOffset;
+        if (valBytes.length <= 4) {
+            const padded = new Uint8Array(4);
+            padded.set(valBytes);
+            valueOrOffset = padded;
+        } else {
+            const offsetVal = heapOffset;
+            heapPieces.push(valBytes);
+            heapOffset += valBytes.length;
+            const buf4 = new Uint8Array(4);
+            writeU32LE(buf4, 0, offsetVal);
+            valueOrOffset = buf4;
+        }
+        return { tag: fldDef.tag, type: TYPE_ASCII, count: fldDef.val.length, valueOrOffset };
+    });
+
+    const exifIfdPtr4 = new Uint8Array(4);
+    writeU32LE(exifIfdPtr4, 0, exifIfdOffsetInTiff);
+    ifd0Entries.push({ tag: TAG_EXIF_IFD_PTR, type: 4, count: 1, valueOrOffset: exifIfdPtr4 });
+    ifd0Entries.sort((a, b) => a.tag - b.tag);
+
+    const exifSubEntries = exifSubTags.map(subTag => {
+        const valBytes = subTag.val;
+        let valueOrOffset;
+        if (valBytes.length <= 4) {
+            const padded = new Uint8Array(4);
+            padded.set(valBytes);
+            valueOrOffset = padded;
+        } else {
+            const offsetVal = heapOffset;
+            heapPieces.push(valBytes);
+            heapOffset += valBytes.length;
+            const buf4 = new Uint8Array(4);
+            writeU32LE(buf4, 0, offsetVal);
+            valueOrOffset = buf4;
+        }
+        return { tag: subTag.tag, type: subTag.type, count: valBytes.length, valueOrOffset };
+    });
+
+    const totalHeapSize = heapPieces.reduce((s, p) => s + p.length, 0);
+    const totalTiffSize = ifd0HeaderSize + exifIfdSize + totalHeapSize;
+    const tiffBuf = new Uint8Array(totalTiffSize);
+
+    tiffBuf[0] = 0x49; tiffBuf[1] = 0x49;
+    writeU16LE(tiffBuf, 2, 0x002A);
+    writeU32LE(tiffBuf, 4, 8);
+
+    let writePos = 8;
+    writeU16LE(tiffBuf, writePos, ifd0Entries.length); writePos += 2;
+    for (const ifdEntry of ifd0Entries) {
+        writeU16LE(tiffBuf, writePos,     ifdEntry.tag);
+        writeU16LE(tiffBuf, writePos + 2, ifdEntry.type);
+        writeU32LE(tiffBuf, writePos + 4, ifdEntry.count);
+        tiffBuf.set(ifdEntry.valueOrOffset, writePos + 8);
+        writePos += 12;
+    }
+    writeU32LE(tiffBuf, writePos, 0); writePos += 4;
+
+    writeU16LE(tiffBuf, writePos, exifSubEntries.length); writePos += 2;
+    for (const subEntry of exifSubEntries) {
+        writeU16LE(tiffBuf, writePos,     subEntry.tag);
+        writeU16LE(tiffBuf, writePos + 2, subEntry.type);
+        writeU32LE(tiffBuf, writePos + 4, subEntry.count);
+        tiffBuf.set(subEntry.valueOrOffset, writePos + 8);
+        writePos += 12;
+    }
+    writeU32LE(tiffBuf, writePos, 0); writePos += 4;
+
+    for (const heapPiece of heapPieces) {
+        tiffBuf.set(heapPiece, writePos);
+        writePos += heapPiece.length;
+    }
+
+    return tiffBuf;
+}
+
+function injectAllPngChunks(originalPngBytes, exifTiffBytes, textChunksArray) {
+    const crcTableData = (() => {
+        const tbl = new Uint32Array(256);
+        for (let tableIdx = 0; tableIdx < 256; tableIdx++) {
+            let crcVal = tableIdx;
+            for (let bitPass = 0; bitPass < 8; bitPass++)
+                crcVal = (crcVal & 1) ? (0xEDB88320 ^ (crcVal >>> 1)) : (crcVal >>> 1);
+            tbl[tableIdx] = crcVal;
+        }
+        return tbl;
+    })();
+
+    function calcCrc(dataBytes) {
+        let crcAccum = 0xFFFFFFFF;
+        for (let dataPos = 0; dataPos < dataBytes.length; dataPos++)
+            crcAccum = crcTableData[(crcAccum ^ dataBytes[dataPos]) & 0xFF] ^ (crcAccum >>> 8);
+        return (crcAccum ^ 0xFFFFFFFF) >>> 0;
+    }
+
+    function buildRawChunk(chunkTypeStr, chunkDataBytes) {
+        const chunkTypePart = new TextEncoder().encode(chunkTypeStr);
+        const crcInput = new Uint8Array(4 + chunkDataBytes.length);
+        crcInput.set(chunkTypePart); crcInput.set(chunkDataBytes, 4);
+        const crcValue = calcCrc(crcInput);
+
+        const fullChunk = new Uint8Array(4 + 4 + chunkDataBytes.length + 4);
+        const chunkLen  = chunkDataBytes.length;
+        fullChunk[0] = (chunkLen >>> 24) & 0xFF;
+        fullChunk[1] = (chunkLen >>> 16) & 0xFF;
+        fullChunk[2] = (chunkLen >>>  8) & 0xFF;
+        fullChunk[3] =  chunkLen         & 0xFF;
+        fullChunk.set(chunkTypePart, 4);
+        fullChunk.set(chunkDataBytes, 8);
+        fullChunk[8 + chunkLen]     = (crcValue >>> 24) & 0xFF;
+        fullChunk[8 + chunkLen + 1] = (crcValue >>> 16) & 0xFF;
+        fullChunk[8 + chunkLen + 2] = (crcValue >>>  8) & 0xFF;
+        fullChunk[8 + chunkLen + 3] =  crcValue         & 0xFF;
+        return fullChunk;
+    }
+
+    function buildTextChunkRaw(keywordStr, textStr) {
+        const enc = new TextEncoder();
+        const keyBytes  = enc.encode(keywordStr);
+        const textBytes = enc.encode(textStr);
+        const chunkData = new Uint8Array(keyBytes.length + 1 + textBytes.length);
+        chunkData.set(keyBytes); chunkData[keyBytes.length] = 0;
+        chunkData.set(textBytes, keyBytes.length + 1);
+        return buildRawChunk('tEXt', chunkData);
+    }
+
+    let insertionPoint = 8;
+    while (insertionPoint < originalPngBytes.length) {
+        const chunkLenHere = (originalPngBytes[insertionPoint]   << 24 |
+                              originalPngBytes[insertionPoint+1] << 16 |
+                              originalPngBytes[insertionPoint+2] <<  8 |
+                              originalPngBytes[insertionPoint+3]) >>> 0;
+        const chunkTypeStr = String.fromCharCode(
+            originalPngBytes[insertionPoint+4], originalPngBytes[insertionPoint+5],
+            originalPngBytes[insertionPoint+6], originalPngBytes[insertionPoint+7]
+        );
+        if (chunkTypeStr === 'IDAT' || chunkTypeStr === 'IEND') break;
+        insertionPoint += 4 + 4 + chunkLenHere + 4;
+    }
+
+    const builtChunks = [buildRawChunk('eXIf', exifTiffBytes)];
+    for (const tChunk of textChunksArray)
+        builtChunks.push(buildTextChunkRaw(tChunk.keyword, tChunk.text));
+
+    const totalExtraSize = builtChunks.reduce((s, c) => s + c.length, 0);
+    const finalPng = new Uint8Array(originalPngBytes.length + totalExtraSize);
+    finalPng.set(originalPngBytes.slice(0, insertionPoint), 0);
+    let writeHead = insertionPoint;
+    for (const chunkBytes of builtChunks) {
+        finalPng.set(chunkBytes, writeHead);
+        writeHead += chunkBytes.length;
+    }
+    finalPng.set(originalPngBytes.slice(insertionPoint), writeHead);
+    return finalPng;
+}
+
+// Init canvas
+theCanvasThing.width  = 1200;
+theCanvasThing.height = 1200;
+thePainter.fillStyle = '#ffffff';
+thePainter.fillRect(0, 0, 1200, 1200);
+squishToMiddle();
+
+// Init sound engine
+SketcherSound.init();
+SketcherSound.setCanvasSize(theCanvasThing.width, theCanvasThing.height);
+
+// ---- Slider readouts wired via JS (no inline oninput) ----
+// Using requestAnimationFrame to batch DOM writes and avoid reflow during input
+function wireSlider(sliderId, readoutId, suffix) {
+    const slider  = document.getElementById(sliderId);
+    const readout = document.getElementById(readoutId);
+    let rafPending = false;
+    slider.addEventListener('input', () => {
+        if (!rafPending) {
+            rafPending = true;
+            requestAnimationFrame(() => {
+                readout.textContent = slider.value + suffix;
+                rafPending = false;
+            });
+        }
+    }, { passive: true });
+}
+wireSlider('fill-width',   'fill-width-val',   'px');
+wireSlider('fill-opacity', 'fill-opacity-val', '%');
+
+// Zoom slider — also via RAF
+const zoomRangeEl = document.getElementById('zoom-range');
+let zoomRafPending = false;
+zoomRangeEl.addEventListener('input', () => {
+    if (!zoomRafPending) {
+        zoomRafPending = true;
+        requestAnimationFrame(() => {
+            doZoomyZoom(+zoomRangeEl.value / 100);
+            zoomRafPending = false;
+        });
+    }
+}, { passive: true });
+
+// Legacy bumpReadout kept for safety (no longer called by sliders)
+function bumpReadout(sliderGuy, labelGuy, suffixThing) {
+    document.getElementById(labelGuy).textContent =
+        document.getElementById(sliderGuy).value + suffixThing;
+}
+
+function sliderTouchStart(touchyEvent) {
+    touchyEvent.stopPropagation();
+}
+
+function sliderTouchMove(touchyEvent) {
+    touchyEvent.stopPropagation();
+    touchyEvent.preventDefault();
+    const theSliderRect = touchyEvent.target.getBoundingClientRect();
+    const fingerX = touchyEvent.touches[0].clientX;
+    const howFarAcross = Math.max(0, Math.min(1, (fingerX - theSliderRect.left) / theSliderRect.width));
+    const minVal = +touchyEvent.target.min;
+    const maxVal = +touchyEvent.target.max;
+    const newSliderValue = Math.round(minVal + howFarAcross * (maxVal - minVal));
+    touchyEvent.target.value = newSliderValue;
+    touchyEvent.target.dispatchEvent(new Event('input'));
+}
+
+// Touch slider support (all sliders)
+document.querySelectorAll('input[type=range]').forEach(sliderElement => {
+    sliderElement.addEventListener('touchstart', sliderTouchStart, { passive: false });
+    sliderElement.addEventListener('touchmove',  sliderTouchMove,  { passive: false });
+});
+
+// Recalculate fit on window resize
+window.addEventListener('resize', () => shoveTransform());
+</script>
+</body>
+</html>
